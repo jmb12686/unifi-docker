@@ -1,31 +1,35 @@
 # unifi-docker
 
-## Fake Ubiquiti Device Discovery Tool discovered on the Chrome Web Store
-From [the announcement](https://community.ubnt.com/t5/Ubiquiti-Announcements-and-News/Fake-Ubiquiti-Device-Discovery-Tool-discovered-on-the-Chrome-Web/ba-p/2204367):
-
-> It has come to our attention that there recently was a fake Chrome Extension listed in the Google Chrome Web Store, pretending to be our Ubiquiti Device Discovery Tool. Not only was it fake, but it is also harmful. At the time of writing, the fake extension has been removed. One thing to keep in mind is that our Chrome App cannot be found by searching the Chrome Web Store due to changes on Google's end. 
-
 ## Run as non-root User
 
 It is suggested you start running this as a non root user. The default right now is to run as root but if you set the environment variable RUNAS_UID0 to false then the image will run as a special unfi user with the uid/gid 999/999. You should ideally set your data and logs to owned by the proper gid. The [environment variables section](https://github.com/jacobalberty/unifi-docker/blob/master/README.md#environment-variables) has more details. At some point in the future this feature may default to on and I personally run all of my own containers with it on. So turning it on for your own containers will help prevent any surprises.
+
+## Mongo and Docker for windows
+ Unifi uses mongo store its data. Mongo uses the fsync() system call on its data files. Because of how docker for windows works you can't bind mount `/unifi/db/data` on a docker for windows container. Therefore `-v ~/unifi:/unifi` won't work.
+ [Discussion on the issue](https://github.com/docker/for-win/issues/138).
 
 ## Supported Docker Hub Tags and Respective `Dockerfile` Links
 
 | Tag | Description |
 |-----|-------------|
-| [`latest`, `stable`, `5.6`](https://github.com/jacobalberty/unifi-docker/blob/master/Dockerfile) | Tracks UniFi stable version - 5.6.30 as of 2018-01-26 |
-| [`oldstable`, `5.5`](https://github.com/jacobalberty/unifi-docker/blob/oldstable/Dockerfile) | Tracks UniFi Old Stable version - 5.5.24 as of 2017-11-13 |
-| [`sc`](https://github.com/jacobalberty/unifi-docker/blob/sc/Dockerfile) | Tracks UniFi "Stable Candidate", The latest stable candidate may flip between the two branches maintained by Ubuiqiti so it is advised you tag off of the version you want directly instead of the `sc` tag. |
+| [`latest`, `stable`, `5.12`](https://github.com/jacobalberty/unifi-docker/blob/master/Dockerfile) | Tracks UniFi stable version - 5.12.66 as of 2020-03-24 [Change Log 5-12-66](https://community.ui.com/releases/UniFi-Network-Controller-5-12-66/ac49e57b-6f38-4912-8455-940d3d487d00)|
+| [`lts`, `5.6`](https://github.com/jacobalberty/unifi-docker/blob/lts/Dockerfile) | Tracks UniFi LTS stable version - 5.6.40 as of 2018-09-10 |
+| [`rc`](https://github.com/jacobalberty/unifi-docker/blob/rc/Dockerfile) | Tracks UniFi "Release Candidate", The latest release candidate may flip between the two branches maintained by Ubiquiti so it is advised you tag off of the version you want directly instead of the `rc` tag. |
 
-### Latest Stable Candidate tags
+### Latest Release Candidate tags
 
 | Version | Latest Tag |
 |---------|------------|
-| 5.6.x   | [`5.6.29-sc`](https://github.com/jacobalberty/unifi-docker/blob/5.6.29-sc/Dockerfile) |
+| 5.11.x   | [`5.11.48-rc`](https://github.com/jacobalberty/unifi-docker/blob/5.11.48-rc/Dockerfile) |
+| 5.12.x   | [`5.12.66-rc`](https://github.com/jacobalberty/unifi-docker/blob/5.12.66-rc/Dockerfile) |
 
-These tags generally track the UniFi APT repository. We do lead the repository a little when it comes to pushing the latest version. The latest version gets pushed when it moves from `stable candidate` to `stable` instead of waiting for it to hit the repository.
+These tags generally track the UniFi APT repository. We do lead the repository a little when it comes to pushing the latest version. The latest version gets pushed when it moves from `release candidate` to `stable` instead of waiting for it to hit the repository.
 
-In adition to these tags you may tag specific versions as well, for example `jacobalberty/unifi:5.4.19` will get you unifi 5.4.19 no matter what the current version is. Stable candidates now exist both under the `sc` tag and for tags with the extension `-sc` ie `jacobalberty/unifi:5.6.18-sc`. It is advised to use the specific versions as the `sc` tag may jump from 5.6.x to 5.5.x then back to 5.6.x as new stable candidates come out.
+In adition to these tags you may tag specific versions as well, for example `jacobalberty/unifi:5.6.40` will get you unifi 5.6.40 no matter what the current version is. Release candidates now exist both under the `rc` tag and for tags with the extension `-rc` ie `jacobalberty/unifi:5.6.18-rc`. It is advised to use the specific versions as the `rc` tag may jump from 5.6.x to 5.8.x then back to 5.6.x as new release candidates come out.
+
+#### Old `sc` tag
+
+The old `sc` tag has been deprecated and replaced with `rc` due to changes from ubnt. `sc` branch still exists just as a pointer to the new `rc` branch. whereas the version tags going forward will be under `-rc` instead.
 
 ## Description
 
@@ -45,11 +49,27 @@ mkdir -p unifi/log
 docker run --rm --init -p 8080:8080 -p 8443:8443 -p 3478:3478/udp -p 10001:10001/udp -e TZ='Africa/Johannesburg' -v ~/unifi:/unifi --name unifi jacobalberty/unifi:stable
 ```
 
+**Note** you must omit `-v ~/unifi:/unifi` on windows, but you can use a local volume e.g. `-v unifi:/unifi` (omit the leading ~/) to persist the data on a local volume.
+
+## Running with separate mongo container
+
+A compose file has been included that will bring up mongo and the controller,
+using named volumes for important directories.
+
+Simply clone this repo or copy the `docker-compose.yml` file and run
+```bash
+docker-compose up -d
+```
+
 ## Adopting Access Points/Switches/Security Gateway
 
 ### Layer 3 Adoption
 
 The default example requires some l3 adoption method. You have a couple options to adopt.
+
+#### Force adoption IP
+
+Run UniFi Docker and open UniFi in browser. Go under Settings -> Controller and then enter the IP address of the Docker host machine in "Controller Hostname/IP", and check the "Override inform host with controller hostname/IP". Save settings and restart UniFi Docker container. 
 
 #### SSH Adoption
 
@@ -100,7 +120,7 @@ Under your containers service definition instead of using `image: jacobalberty/u
 ```shell
         image: jacobalberty/unifi:beta
          environment:
-          PKGURL: https://dl.ubnt.com/unifi/5.5.24/unifi_sysvinit_all.deb
+          PKGURL: https://dl.ubnt.com/unifi/5.6.40/unifi_sysvinit_all.deb
 ```
 
 Once again, simply change PKGURL to point to the package you would like to use.
@@ -166,6 +186,18 @@ Default: `true`
 
 This is used to determine whether or not the UniFi service runs as a privileged (root) user. The default value is `true` but it is recommended to use `false` instead.
 
+### `UNIFI_HTTP_PORT`
+
+Default: `8080`
+
+This is the HTTP port used by the Web interface. Browsers will be redirected to the `UNIFI_HTTPS_PORT`.
+
+### `UNIFI_HTTPS_PORT`
+
+Default: `8443`
+
+This is the HTTPS port used by the Web interface.
+
 ### `UNIFI_UID` and `UNIFI_GID`
 
 Default: `999` for both
@@ -187,6 +219,12 @@ Ex:
 ```
 
 as a fix for https://community.ubnt.com/t5/UniFi-Routing-Switching/IMPORTANT-Debian-Ubuntu-users-MUST-READ-Updated-06-21/m-p/1968251#M48264
+
+### `JVM_EXTRA_OPTS`
+
+Default: `unset`
+
+Used to start the JVM with additional arguments.
 
 ### External MongoDB environment variables
 
@@ -234,7 +272,7 @@ While micro-service patterns try to avoid running multiple processes in a contai
 
 ## Init scripts
 
-You may now place init scripts to be launched during the unifi startup in /usr/local/unifi/init.d to perform any actions unique to your unifi setup. An example bash script to set up certificates is in `/usr/unifi/init.d/import.sh`.
+You may now place init scripts to be launched during the unifi startup in /usr/local/unifi/init.d to perform any actions unique to your unifi setup. An example bash script to set up certificates is in `/usr/unifi/init.d/import_cert`.
 
 ## Certificate Support
 
@@ -248,7 +286,7 @@ privkey.pem # Private key for the cert
 chain.pem # full cert chain
 ```
 
-If your certificate has a different name, you can set the environment variable `CERTNAME` to the name of your certificate, e.g. `CERTNAME=my-cert.pem`.
+If your certificate or private key have different names, you can set the environment variables `CERTNAME` and `CERT_PRIVATE_NAME` to the name of your certificate/private key, e.g. `CERTNAME=my-cert.pem` and `CERT_PRIVATE_NAME=my-privkey.pem`.
 
 For letsencrypt certs, we'll autodetect that and add the needed Identrust X3 CA Cert automatically. In case your letsencrypt cert is already the chained certificate, you can set the `CERT_IS_CHAIN` environment variable to `true`, e.g. `CERT_IS_CHAIN=true`. This option also works together with a custom `CERTNAME`.
 

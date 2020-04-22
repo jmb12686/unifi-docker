@@ -2,9 +2,13 @@
 
 . /usr/unifi/functions
 
+if [ -x /usr/local/bin/docker-build.sh ]; then
+    /usr/local/bin/docker-build.sh "${PKGURL}"
+fi
+
 exit_handler() {
     log "Exit signal received, shutting down"
-    ${JSVC} -nodetach -pidfile ${PIDFILE} -stop ${MAINCLASS} stop
+    java -jar ${BASEDIR}/lib/ace.jar stop
     for i in `seq 1 10` ; do
         [ -z "$(pgrep -f ${BASEDIR}/lib/ace.jar)" ] && break
         # graceful shutdown
@@ -26,7 +30,6 @@ trap 'kill ${!}; exit_handler' SIGHUP SIGINT SIGQUIT SIGTERM
 
 
 # vars similar to those found in unifi.init
-JSVC=$(command -v jsvc)
 MONGOPORT=27117
 
 CODEPATH=${BASEDIR}
@@ -34,16 +37,15 @@ DATALINK=${BASEDIR}/data
 LOGLINK=${BASEDIR}/logs
 RUNLINK=${BASEDIR}/run
 
-DIRS="${RUNDIR} ${LOGDIR} ${DATADIR}"
+DIRS="${RUNDIR} ${LOGDIR} ${DATADIR} ${BASEDIR}"
 
-JAVA_ENTROPY_GATHER_DEVICE=
-JVM_MAX_HEAP_SIZE=1024M
-JVM_INIT_HEAP_SIZE=
-UNIFI_JVM_EXTRA_OPTS=
+JVM_MAX_HEAP_SIZE=${JVM_MAX_HEAP_SIZE:-1024M}
+#JVM_INIT_HEAP_SIZE=
 
-ENABLE_UNIFI=yes
-JVM_EXTRA_OPTS="-cwd /usr/lib/unifi"
-JSVC_EXTRA_OPTS=
+#JAVA_ENTROPY_GATHER_DEVICE=
+#UNIFI_JVM_EXTRA_OPTS=
+#ENABLE_UNIFI=yes
+
 
 MONGOLOCK="${DATAPATH}/db/mongod.lock"
 JVM_EXTRA_OPTS="${JVM_EXTRA_OPTS} -Dunifi.datadir=${DATADIR} -Dunifi.logdir=${LOGDIR} -Dunifi.rundir=${RUNDIR}"
@@ -65,19 +67,6 @@ fi
 JVM_OPTS="${JVM_EXTRA_OPTS}
   -Djava.awt.headless=true
   -Dfile.encoding=UTF-8"
-
-
-JSVC_OPTS="
-  -home ${JAVA_HOME}
-  -classpath /usr/share/java/commons-daemon.jar:${BASEDIR}/lib/ace.jar
-  -pidfile ${PIDFILE}
-  -procname unifi
-  -outfile ${LOGDIR}/unifi.out.log
-  -errfile ${LOGDIR}/unifi.err.log
-  ${JVM_OPTS}"
-
-# One issue might be no cron and lograte, causing the log volume to become bloated over time! Consider `-keepstdin` and `-errfile &2` options for JSVC.
-MAINCLASS='com.ubnt.ace.Launcher'
 
 # Cleaning /var/run/unifi/* See issue #26, Docker takes care of exlusivity in the container anyway.
 rm -f /var/run/unifi/unifi.pid
@@ -103,7 +92,7 @@ confSet () {
   fi
 }
 
-confFile=/unifi/data/system.properties
+confFile="${DATADIR}/system.properties"
 if [ -e "$confFile" ]; then
   newfile=false
 else
@@ -111,6 +100,22 @@ else
 fi
 
 declare -A settings
+
+h2mb() {
+  awkcmd='
+    /[0-9]$/{print $1/1024/1024;next};
+    /[mM]$/{printf "%u\n", $1;next};
+    /[kK]$/{printf "%u\n", $1/1024;next}
+    /[gG]$/{printf "%u\n", $1*1024;next}
+  '
+  echo $1 | awk "${awkcmd}"
+}
+
+if ! [[ -z "$LOTSOFDEVICES" ]]; then
+  settings["unifi.G1GC.enabled"]="true"
+  settings["unifi.xms"]="$(h2mb $JVM_INIT_HEAP_SIZE)"
+  settings["unifi.xmx"]="$(h2mb ${JVM_MAX_HEAP_SIZE:-1024M})"
+fi
 
 # Implements issue #30
 if ! [[ -z "$DB_URI" || -z "$STATDB_URI" || -z "$DB_NAME" ]]; then
@@ -120,10 +125,21 @@ if ! [[ -z "$DB_URI" || -z "$STATDB_URI" || -z "$DB_NAME" ]]; then
   settings["unifi.db.name"]="$DB_NAME"
 fi
 
+if ! [[ -z "$UNIFI_HTTP_PORT"  ]]; then
+  settings["unifi.http.port"]="$UNIFI_HTTP_PORT"
+fi
+
+if ! [[ -z "$UNIFI_HTTPS_PORT"  ]]; then
+  settings["unifi.https.port"]="$UNIFI_HTTPS_PORT"
+fi
+
 for key in "${!settings[@]}"; do
   confSet "$confFile" "$key" "${settings[$key]}"
 done
-UNIFI_CMD="${JSVC} -nodetach ${JSVC_OPTS} ${MAINCLASS} start"
+UNIFI_CMD="java ${JVM_OPTS} -jar ${BASEDIR}/lib/ace.jar start"
+
+# controller writes to relative path logs/server.log
+cd ${BASEDIR}
 
 CUID=$(id -u)
 
@@ -167,7 +183,7 @@ if [[ "${@}" == "unifi" ]]; then
         gosu unifi:unifi ${UNIFI_CMD} &
     fi
     wait
-    log "WARN: unifi service process ended without being singaled? Check for errors in ${LOGDIR}." >&2
+    log "WARN: unifi service process ended without being signaled? Check for errors in ${LOGDIR}." >&2
 else
     log "Executing: ${@}"
     exec ${@}
